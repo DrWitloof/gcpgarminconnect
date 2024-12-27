@@ -1,7 +1,6 @@
 options:
   logging: CLOUD_LOGGING_ONLY
-  machineType: 'E2_SMALL'
-  substitutionOption: ALLOW_LOOSE
+
 
 steps:
   # Stap 1: Build Docker-image met caching ingeschakeld
