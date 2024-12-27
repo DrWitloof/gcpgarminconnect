@@ -1,4 +1,5 @@
 flask
+matplotlib
+numpy
 garminconnect
 waitress
-gunicorn
