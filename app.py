@@ -51,7 +51,7 @@ def index():
 
 def generate_graph(start_date, end_date):
     """
-    Genereer de grafiek met hartslagverdeling en histogram.
+    Genereer de grafiek met hartslagverdeling en een lognormale curve.
     """
     # Verbinding met Garmin Connect
     logging.info("Verbinding maken met Garmin Connect...")
@@ -79,15 +79,25 @@ def generate_graph(start_date, end_date):
     if not combined_data:
         raise ValueError("Geen gegevens beschikbaar voor de opgegeven periode.")
 
-    # Data voor histogram en grafiek
+    # Data voor histogram en lognormale verdeling
     heart_rate_array = np.array(combined_data)
-    hist, bins = np.histogram(heart_rate_array, bins=np.arange(40, 200, 10), density=True)
+    mean = np.mean(heart_rate_array)
+    std_dev = np.std(heart_rate_array)
+
+    # Bereken de lognormale verdeling
+    x = np.linspace(min(heart_rate_array), max(heart_rate_array), 500)
+    scale = 1 / (np.sqrt(2 * np.pi) * std_dev)
+    lognorm_pdf = scale * np.exp(-0.5 * ((np.log(x) - np.log(mean)) / std_dev) ** 2)
+
+    # Schaal lognormale verdeling naar histogramhoogte
+    hist, bins = np.histogram(heart_rate_array, bins=np.arange(40, 200, 10), density=False)
     bin_centers = (bins[:-1] + bins[1:]) / 2
+    lognorm_pdf *= max(hist) / max(lognorm_pdf)
 
     # Plot genereren
     plt.figure(figsize=(8, 4))
     plt.bar(bin_centers, hist, width=8, color="orange", alpha=0.7, label="Histogram")
-    plt.plot(bin_centers, hist, 'r-', label="Trendlijn")
+    plt.plot(x, lognorm_pdf, 'r-', label="Lognormale verdeling")
     plt.xlabel("Hartslag (bpm)")
     plt.ylabel("Frequentie")
     plt.title("Hartslagverdeling")
@@ -100,6 +110,7 @@ def generate_graph(start_date, end_date):
     plt.close()
 
     return img
+
 
 
 @app.route("/health", methods=["GET"])
