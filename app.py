@@ -66,71 +66,78 @@ def fetch_heart_rate_data():
         if not USERNAME or not PASSWORD:
             raise ValueError("Gebruikersnaam of wachtwoord is niet ingesteld als omgevingsvariabele.")
 
+        # Queryparameters ophalen
+        to_date = request.args.get("to_date")
+        from_date = request.args.get("from_date")
+
+        # Standaardwaarde voor to_date: gisteren
+        if not to_date:
+            to_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Standaardwaarde voor from_date: 7 dagen vóór to_date
+        if not from_date:
+            from_date = (datetime.strptime(to_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+
+        try:
+            start_date = datetime.strptime(from_date, "%Y-%m-%d")
+            end_date = datetime.strptime(to_date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Ongeldig datumformaat. Gebruik 'YYYY-MM-DD'.")
+
+        if start_date > end_date:
+            raise ValueError("'from_date' mag niet later zijn dan 'to_date'.")
+
+        logging.info(f"Gegevens ophalen van {from_date} tot {to_date}.")
+
         logging.info("Verbinding maken met Garmin Connect...")
         client = Garmin(USERNAME, PASSWORD)
         client.login()
         logging.info("Succesvol ingelogd op Garmin Connect.")
 
-        # Instellingen voor datumbereiken
-        today = datetime.now()
-        weeks_to_fetch = 2
-        date_ranges = get_date_ranges(today, weeks_to_fetch)
-        logging.info(f"Datumbereiken gegenereerd voor {weeks_to_fetch} weken.")
+        current_date = start_date
+        combined_data = []
 
-        weekly_heart_rate_data = {}
-
-        for start_date, end_date in date_ranges:
-            week_key = f"{start_date.strftime('%Y-%m-%d')} tot {end_date.strftime('%Y-%m-%d')}"
-            logging.info(f"Gegevens ophalen voor week: {week_key}...")
-
+        while current_date <= end_date:
+            cdate = current_date.strftime('%Y-%m-%d')
             try:
-                # Combineer dagelijkse gegevens binnen de week
-                week_data = []
-                for i in range(7):
-                    cdate = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
-                    try:
-                        daily_data = client.get_heart_rates(cdate)
-                        if daily_data and "heartRateValues" in daily_data:
-                            heart_rate_values = [
-                                value[1] for value in daily_data["heartRateValues"] if value[1] is not None
-                            ]
-                            if heart_rate_values:
-                                logging.info(f"  {len(heart_rate_values)} geldige metingen gevonden voor {cdate}.")
-                                # Voeg elke hartslagwaarde met een duur van 2 minuten toe
-                                week_data.extend([{"heartRate": hr, "duration": 120} for hr in heart_rate_values])
-                            else:
-                                logging.info(f"  Geen geldige metingen gevonden voor {cdate}.")
-                        else:
-                            logging.info(f"  Geen gegevens beschikbaar voor {cdate}.")
-                    except Exception as e:
-                        logging.error(f"  Fout bij ophalen van gegevens voor {cdate}: {e}")
-
-                # Controleer of er gegevens zijn voor de week
-                if not week_data:
-                    logging.info(f"Geen gegevens beschikbaar voor week {week_key}.")
-                    continue
-
-                # Groeperen en analyseren van gegevens
-                grouped_data = group_heart_rate_data(week_data)
-                logging.info(f"Gegevens gegroepeerd in intervallen van {HEART_RATE_RANGE_STEP} bpm.")
-
-                total_time, percentages = calculate_percentages(grouped_data)
-                logging.info(f"Totale tijd: {total_time // 60} minuten.")
-                for range_key, percent in percentages.items():
-                    logging.info(f"  {range_key}: {percent:.2f}% van de tijd.")
-
-                # Opslaan in overzicht
-                weekly_heart_rate_data[week_key] = {
-                    "grouped_data": grouped_data,
-                    "total_time_minutes": total_time // 60,
-                    "percentages": percentages,
-                }
-
+                daily_data = client.get_heart_rates(cdate)
+                if daily_data and "heartRateValues" in daily_data:
+                    heart_rate_values = [
+                        value[1] for value in daily_data["heartRateValues"] if value[1] is not None
+                    ]
+                    if heart_rate_values:
+                        logging.info(f"  {len(heart_rate_values)} geldige metingen gevonden voor {cdate}.")
+                        combined_data.extend([{"heartRate": hr, "duration": 120} for hr in heart_rate_values])
+                    else:
+                        logging.info(f"  Geen geldige metingen gevonden voor {cdate}.")
+                else:
+                    logging.info(f"  Geen gegevens beschikbaar voor {cdate}.")
             except Exception as e:
-                logging.error(f"Fout bij het verwerken van gegevens voor week {week_key}: {e}")
+                logging.error(f"  Fout bij ophalen van gegevens voor {cdate}: {e}")
+            current_date += timedelta(days=1)
 
-        logging.info("Alle gegevens succesvol verwerkt.")
-        return jsonify(weekly_heart_rate_data)
+        if not combined_data:
+            logging.info("Geen gegevens beschikbaar voor de opgegeven periode.")
+            return jsonify({"message": "Geen gegevens beschikbaar voor de opgegeven periode."}), 404
+
+        # Groeperen en analyseren van gegevens
+        grouped_data = group_heart_rate_data(combined_data)
+        logging.info(f"Gegevens gegroepeerd in intervallen van {HEART_RATE_RANGE_STEP} bpm.")
+
+        total_time, percentages = calculate_percentages(grouped_data)
+        logging.info(f"Totale tijd: {total_time // 60} minuten.")
+        for range_key, percent in percentages.items():
+            logging.info(f"  {range_key}: {percent:.2f}% van de tijd.")
+
+        result = {
+            "from_date": from_date,
+            "to_date": to_date,
+            "grouped_data": grouped_data,
+            "total_time_minutes": total_time // 60,
+            "percentages": {k: percentages[k] for k in sorted(percentages)},
+        }
+
+        return jsonify(result)
 
     except GarminConnectConnectionError as conn_err:
         logging.error(f"Verbindingsfout met Garmin Connect: {conn_err}")
