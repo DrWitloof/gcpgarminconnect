@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, url_for, redirect
 import logging
 from datetime import datetime, timedelta
 from garminconnect import Garmin
@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import io
+import base64
 
 app = Flask(__name__)
 
@@ -19,34 +20,36 @@ PASSWORD = os.environ.get("PASSWORD")
 @app.route("/", methods=["GET", "POST"])
 def index():
     """
-    Startpagina met een formulier voor datumselectie.
+    Startpagina met een formulier voor datumselectie en de grafiekweergave.
     """
+    graph_url = None
+    error = None
+
     if request.method == "POST":
         # Ophalen van datums uit formulier
         from_date = request.form.get("from_date")
         to_date = request.form.get("to_date")
 
         if not from_date or not to_date:
-            return render_template("index.html", error="Beide datums moeten worden ingevuld.")
+            error = "Beide datums moeten worden ingevuld."
+        else:
+            try:
+                # Convert datums naar datetime objecten
+                start_date = datetime.strptime(from_date, "%Y-%m-%d")
+                end_date = datetime.strptime(to_date, "%Y-%m-%d")
 
-        try:
-            # Convert datums naar datetime objecten
-            start_date = datetime.strptime(from_date, "%Y-%m-%d")
-            end_date = datetime.strptime(to_date, "%Y-%m-%d")
-        except ValueError:
-            return render_template("index.html", error="Ongeldig datumformaat. Gebruik 'YYYY-MM-DD'.")
+                if start_date > end_date:
+                    error = "'From date' mag niet later zijn dan 'To date'."
+                else:
+                    # Genereer de grafiek
+                    graph_url = generate_graph(start_date, end_date)
 
-        if start_date > end_date:
-            return render_template("index.html", error="'From date' mag niet later zijn dan 'To date'.")
+            except ValueError:
+                error = "Ongeldig datumformaat. Gebruik 'YYYY-MM-DD'."
+            except Exception as e:
+                error = f"Fout bij ophalen van gegevens: {e}"
 
-        # Genereer grafiek
-        try:
-            image_stream = generate_graph(start_date, end_date)
-            return send_file(image_stream, mimetype="image/png")
-        except Exception as e:
-            return render_template("index.html", error=f"Fout bij ophalen van gegevens: {e}")
-
-    return render_template("index.html")
+    return render_template("index.html", graph_url=graph_url, error=error)
 
 
 def generate_graph(start_date, end_date):
@@ -81,8 +84,8 @@ def generate_graph(start_date, end_date):
 
     # Data voor histogram en lognormale verdeling
     heart_rate_array = np.array(combined_data)
-    mean = np.mean(np.log(heart_rate_array))  # Gemiddelde van de logwaarden
-    std_dev = np.std(np.log(heart_rate_array))  # Standaardafwijking van de logwaarden
+    mean = np.mean(np.log(heart_rate_array))
+    std_dev = np.std(np.log(heart_rate_array))
 
     # Bereken de lognormale verdeling
     x = np.linspace(min(heart_rate_array), max(heart_rate_array), 500)
@@ -104,15 +107,14 @@ def generate_graph(start_date, end_date):
     plt.title("Hartslagverdeling")
     plt.legend()
 
-    # Opslaan naar een in-memory stream
+    # Opslaan naar een Base64-afbeelding
     img = io.BytesIO()
     plt.savefig(img, format="png")
     img.seek(0)
+    img_base64 = base64.b64encode(img.getvalue()).decode()
     plt.close()
 
-    return img
-
-
+    return f"data:image/png;base64,{img_base64}"
 
 
 @app.route("/health", methods=["GET"])
@@ -120,7 +122,7 @@ def health_check():
     """
     Health check endpoint om te controleren of de service actief is.
     """
-    return jsonify({"status": "healthy", "message": "De service is actief en operationeel"}), 200
+    return {"status": "healthy", "message": "De service is actief en operationeel"}, 200
 
 
 if __name__ == "__main__":
