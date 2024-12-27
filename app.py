@@ -51,49 +51,68 @@ def health_check():
 @app.route("/heart-rate-data", methods=["GET"])
 def fetch_heart_rate_data():
     try:
+        # Validatie van omgevingsvariabelen
         if not USERNAME or not PASSWORD:
             raise ValueError("Gebruikersnaam of wachtwoord is niet ingesteld als omgevingsvariabele.")
 
+        logging.info("Verbinding maken met Garmin Connect...")
         client = Garmin(USERNAME, PASSWORD)
         client.login()
-        logging.info("Succesvol ingelogd!")
+        logging.info("Succesvol ingelogd op Garmin Connect.")
 
+        # Instellingen voor datumbereiken
         today = datetime.now()
         weeks_to_fetch = 20
         date_ranges = get_date_ranges(today, weeks_to_fetch)
+        logging.info(f"Datumbereiken gegenereerd voor {weeks_to_fetch} weken.")
 
         weekly_heart_rate_data = {}
 
         for start_date, end_date in date_ranges:
             week_key = f"{start_date.strftime('%Y-%m-%d')} tot {end_date.strftime('%Y-%m-%d')}"
+            logging.info(f"Gegevens ophalen voor week: {week_key}...")
+
             try:
+                # Ophalen van hartslaggegevens
                 heart_rate_data = client.get_heart_rates_between_dates(
                     start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
                 )
                 if not heart_rate_data:
-                    logging.info(f"Geen gegevens beschikbaar voor week {week_key}.")
+                    logging.info(f"Geen gegevens gevonden voor week {week_key}.")
                     continue
 
+                logging.info(f"{len(heart_rate_data)} metingen gevonden voor week {week_key}.")
+
+                # Groeperen en analyseren van gegevens
                 grouped_data = group_heart_rate_data(heart_rate_data)
+                logging.info(f"Gegevens gegroepeerd in intervallen van {HEART_RATE_RANGE_STEP} bpm.")
+
                 total_time, percentages = calculate_percentages(grouped_data)
+                logging.info(f"Totale tijd: {total_time // 60} minuten.")
+                for range_key, percent in percentages.items():
+                    logging.info(f"  {range_key}: {percent:.2f}% van de tijd.")
+
+                # Opslaan in overzicht
                 weekly_heart_rate_data[week_key] = {
                     "grouped_data": grouped_data,
                     "total_time_minutes": total_time // 60,
                     "percentages": percentages,
                 }
-            except Exception as e:
-                logging.error(f"Fout bij ophalen van week {week_key}: {e}")
 
+            except Exception as e:
+                logging.error(f"Fout bij het verwerken van gegevens voor week {week_key}: {e}")
+
+        logging.info("Alle gegevens succesvol verwerkt.")
         return jsonify(weekly_heart_rate_data)
 
     except GarminConnectConnectionError as conn_err:
-        logging.error(f"Verbindingsfout: {conn_err}")
-        return jsonify({"error": "Verbindingsfout"}), 500
+        logging.error(f"Verbindingsfout met Garmin Connect: {conn_err}")
+        return jsonify({"error": "Verbindingsfout met Garmin Connect"}), 500
     except GarminConnectTooManyRequestsError as too_many_requests_err:
         logging.error(f"Te veel aanvragen: {too_many_requests_err}")
         return jsonify({"error": "Te veel aanvragen"}), 429
     except ValueError as ve:
-        logging.error(str(ve))
+        logging.error(f"Validatiefout: {ve}")
         return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logging.error(f"Onverwachte fout: {e}")
