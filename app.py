@@ -73,18 +73,28 @@ def fetch_heart_rate_data():
             logging.info(f"Gegevens ophalen voor week: {week_key}...")
 
             try:
-                # Ophalen van hartslaggegevens
-                heart_rate_data = client.get_heart_rates_between_dates(
-                    start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
-                )
-                if not heart_rate_data:
-                    logging.info(f"Geen gegevens gevonden voor week {week_key}.")
+                # Combineer dagelijkse gegevens binnen de week
+                week_data = []
+                for i in range(7):
+                    cdate = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
+                    try:
+                        daily_data = client.get_heart_rates(cdate)
+                        if daily_data:
+                            logging.info(f"  {len(daily_data)} metingen gevonden voor {cdate}.")
+                            logging.info(f"  {daily_data}")
+                            week_data.extend(daily_data)
+                        else:
+                            logging.info(f"  Geen metingen gevonden voor {cdate}.")
+                    except Exception as e:
+                        logging.error(f"  Fout bij ophalen van gegevens voor {cdate}: {e}")
+
+                # Controleer of er gegevens zijn voor de week
+                if not week_data:
+                    logging.info(f"Geen gegevens beschikbaar voor week {week_key}.")
                     continue
 
-                logging.info(f"{len(heart_rate_data)} metingen gevonden voor week {week_key}.")
-
                 # Groeperen en analyseren van gegevens
-                grouped_data = group_heart_rate_data(heart_rate_data)
+                grouped_data = group_heart_rate_data(week_data)
                 logging.info(f"Gegevens gegroepeerd in intervallen van {HEART_RATE_RANGE_STEP} bpm.")
 
                 total_time, percentages = calculate_percentages(grouped_data)
@@ -117,6 +127,7 @@ def fetch_heart_rate_data():
     except Exception as e:
         logging.error(f"Onverwachte fout: {e}")
         return jsonify({"error": "Onverwachte fout"}), 500
+
 
 if __name__ == "__main__":
     from waitress import serve
