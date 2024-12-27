@@ -16,14 +16,25 @@ USERNAME = os.environ.get("USERNAME")
 PASSWORD = os.environ.get("PASSWORD")
 
 def group_heart_rate_data(heart_rate_data):
+    """
+    Groepeer hartslagmetingen in intervallen van HEART_RATE_RANGE_STEP bpm en sorteer buckets.
+    """
     grouped_data = defaultdict(int)
     for entry in heart_rate_data:
         heart_rate = entry.get("heartRate", 0)
         time_in_seconds = entry.get("duration", 0)
-        range_key = f"{(heart_rate // HEART_RATE_RANGE_STEP) * HEART_RATE_RANGE_STEP}-" \
-                    f"{(heart_rate // HEART_RATE_RANGE_STEP) * HEART_RATE_RANGE_STEP + (HEART_RATE_RANGE_STEP - 1)}"
+
+        # Creëer een bucket in het formaat "999-999"
+        lower_bound = (heart_rate // HEART_RATE_RANGE_STEP) * HEART_RATE_RANGE_STEP
+        upper_bound = lower_bound + HEART_RATE_RANGE_STEP - 1
+        range_key = f"{lower_bound:03}-{upper_bound:03}"
+
         grouped_data[range_key] += time_in_seconds
-    return grouped_data
+
+    # Sorteer de buckets op hun numerieke waarde
+    sorted_grouped_data = {k: grouped_data[k] for k in sorted(grouped_data)}
+
+    return sorted_grouped_data
 
 def calculate_percentages(grouped_data):
     total_time = sum(grouped_data.values())
