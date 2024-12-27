@@ -8,7 +8,7 @@ import os
 app = Flask(__name__)
 
 # Logging configuratie
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 # Constantes
 HEART_RATE_RANGE_STEP = 10
@@ -41,9 +41,19 @@ def get_date_ranges(start_date, weeks):
         date_ranges.append((start_date, end_date))
     return date_ranges
 
+@app.route("/health", methods=["GET"])
+def health_check():
+    """
+    Health check endpoint om te controleren of de service actief is.
+    """
+    return jsonify({"status": "healthy", "message": "De service is actief en operationeel"}), 200
+
 @app.route("/heart-rate-data", methods=["GET"])
 def fetch_heart_rate_data():
     try:
+        if not USERNAME or not PASSWORD:
+            raise ValueError("Gebruikersnaam of wachtwoord is niet ingesteld als omgevingsvariabele.")
+
         client = Garmin(USERNAME, PASSWORD)
         client.login()
         logging.info("Succesvol ingelogd!")
@@ -82,9 +92,14 @@ def fetch_heart_rate_data():
     except GarminConnectTooManyRequestsError as too_many_requests_err:
         logging.error(f"Te veel aanvragen: {too_many_requests_err}")
         return jsonify({"error": "Te veel aanvragen"}), 429
+    except ValueError as ve:
+        logging.error(str(ve))
+        return jsonify({"error": str(ve)}), 400
     except Exception as e:
         logging.error(f"Onverwachte fout: {e}")
         return jsonify({"error": "Onverwachte fout"}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
+    from waitress import serve
+    # Gebruik poort 8080, zoals vereist door Cloud Run
+    serve(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
