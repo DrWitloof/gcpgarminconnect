@@ -1,53 +1,90 @@
-from flask import Flask, redirect, request, session, url_for, jsonify
-from requests_oauthlib import OAuth2Session
+from flask import Flask, jsonify
+import logging
+from collections import defaultdict
+from datetime import datetime, timedelta
+from garminconnect import Garmin, GarminConnectConnectionError, GarminConnectTooManyRequestsError
 import os
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "supersecretkey")
 
-# OAuth2 configuratie
-CLIENT_ID = os.environ.get("CLIENT_ID")
-CLIENT_SECRET = os.environ.get("CLIENT_SECRET")
-TOKEN_URL = "https://connect.garmin.com/oauth-service/oauth/token"
-AUTHORIZE_URL = "https://connect.garmin.com/oauth-service/oauth/authorize"
-REDIRECT_URI = os.environ.get("REDIRECT_URI", "http://localhost:5000/callback")
+# Logging configuratie
+logging.basicConfig(level=logging.DEBUG)
 
-@app.route("/")
-def index():
-    """
-    Homepage met link naar OAuth-login.
-    """
-    if "oauth_token" in session:
-        return jsonify({"message": "Je bent al ingelogd", "token": session["oauth_token"]})
-    return '<a href="/login">Inloggen met Garmin Connect</a>'
+# Constantes
+HEART_RATE_RANGE_STEP = 10
+USERNAME = os.environ.get("USERNAME")
+PASSWORD = os.environ.get("PASSWORD")
 
-@app.route("/login")
-def login():
-    """
-    Start de OAuth-login en stuur gebruiker door naar Garmin Connect.
-    """
-    oauth = OAuth2Session(client_id=CLIENT_ID, redirect_uri=REDIRECT_URI)
-    authorization_url, state = oauth.authorization_url(AUTHORIZE_URL)
-    session["oauth_state"] = state
-    return redirect(authorization_url)
+def group_heart_rate_data(heart_rate_data):
+    grouped_data = defaultdict(int)
+    for entry in heart_rate_data:
+        heart_rate = entry.get("heartRate", 0)
+        time_in_seconds = entry.get("duration", 0)
+        range_key = f"{(heart_rate // HEART_RATE_RANGE_STEP) * HEART_RATE_RANGE_STEP}-" \
+                    f"{(heart_rate // HEART_RATE_RANGE_STEP) * HEART_RATE_RANGE_STEP + (HEART_RATE_RANGE_STEP - 1)}"
+        grouped_data[range_key] += time_in_seconds
+    return grouped_data
 
-@app.route("/callback")
-def callback():
-    """
-    Ontvang de OAuth-callback en sla de token op in de sessie.
-    """
-    oauth = OAuth2Session(client_id=CLIENT_ID, redirect_uri=REDIRECT_URI, state=session["oauth_state"])
-    token = oauth.fetch_token(TOKEN_URL, client_secret=CLIENT_SECRET, authorization_response=request.url)
-    session["oauth_token"] = token
-    return jsonify({"message": "Ingelogd!", "token": token})
+def calculate_percentages(grouped_data):
+    total_time = sum(grouped_data.values())
+    percentages = {
+        range_key: (time_in_seconds / total_time) * 100
+        for range_key, time_in_seconds in grouped_data.items()
+    }
+    return total_time, percentages
 
-@app.route("/logout")
-def logout():
-    """
-    Verwijder de sessie en log uit.
-    """
-    session.pop("oauth_token", None)
-    return redirect(url_for("index"))
+def get_date_ranges(start_date, weeks):
+    date_ranges = []
+    for i in range(weeks):
+        end_date = start_date - timedelta(days=i * 7)
+        start_date = end_date - timedelta(days=6)
+        date_ranges.append((start_date, end_date))
+    return date_ranges
+
+@app.route("/heart-rate-data", methods=["GET"])
+def fetch_heart_rate_data():
+    try:
+        client = Garmin(USERNAME, PASSWORD)
+        client.login()
+        logging.info("Succesvol ingelogd!")
+
+        today = datetime.now()
+        weeks_to_fetch = 20
+        date_ranges = get_date_ranges(today, weeks_to_fetch)
+
+        weekly_heart_rate_data = {}
+
+        for start_date, end_date in date_ranges:
+            week_key = f"{start_date.strftime('%Y-%m-%d')} tot {end_date.strftime('%Y-%m-%d')}"
+            try:
+                heart_rate_data = client.get_heart_rates_between_dates(
+                    start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+                )
+                if not heart_rate_data:
+                    logging.info(f"Geen gegevens beschikbaar voor week {week_key}.")
+                    continue
+
+                grouped_data = group_heart_rate_data(heart_rate_data)
+                total_time, percentages = calculate_percentages(grouped_data)
+                weekly_heart_rate_data[week_key] = {
+                    "grouped_data": grouped_data,
+                    "total_time_minutes": total_time // 60,
+                    "percentages": percentages,
+                }
+            except Exception as e:
+                logging.error(f"Fout bij ophalen van week {week_key}: {e}")
+
+        return jsonify(weekly_heart_rate_data)
+
+    except GarminConnectConnectionError as conn_err:
+        logging.error(f"Verbindingsfout: {conn_err}")
+        return jsonify({"error": "Verbindingsfout"}), 500
+    except GarminConnectTooManyRequestsError as too_many_requests_err:
+        logging.error(f"Te veel aanvragen: {too_many_requests_err}")
+        return jsonify({"error": "Te veel aanvragen"}), 429
+    except Exception as e:
+        logging.error(f"Onverwachte fout: {e}")
+        return jsonify({"error": "Onverwachte fout"}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
