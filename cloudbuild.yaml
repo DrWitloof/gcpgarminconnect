@@ -18,7 +18,7 @@ steps:
       - '--platform'
       - 'managed'
       - '--region'
-      - 'us-central1'
+      - 'europe-west1'
       - '--allow-unauthenticated'
       - '--set-env-vars'
       - 'USERNAME=${_USERNAME},PASSWORD=${_PASSWORD}'
