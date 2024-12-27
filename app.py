@@ -93,17 +93,19 @@ def generate_graph(start_date, end_date):
         -((np.log(x) - mean) ** 2) / (2 * std_dev ** 2)
     )
 
-    # Schaal lognormale verdeling naar histogramhoogte
+    # Histogram omzetten naar percentages
     hist, bins = np.histogram(heart_rate_array, bins=np.arange(40, 200, 10), density=False)
+    total_count = sum(hist)
+    hist_percentage = (hist / total_count) * 100  # Converteer naar percentages
     bin_centers = (bins[:-1] + bins[1:]) / 2
-    pdf_scaled = pdf * max(hist) / max(pdf)
+    pdf_scaled = pdf * max(hist_percentage) / max(pdf)
 
     # Plot genereren
     plt.figure(figsize=(8, 4))
-    plt.bar(bin_centers, hist, width=8, color="orange", alpha=0.7, label="Histogram")
+    plt.bar(bin_centers, hist_percentage, width=8, color="orange", alpha=0.7, label="Histogram (in %)")
     plt.plot(x, pdf_scaled, 'r-', label="Lognormale verdeling")
     plt.xlabel("Hartslag (bpm)")
-    plt.ylabel("Frequentie")
+    plt.ylabel("Percentage (%)")
     plt.title("Hartslagverdeling")
     plt.legend()
 
@@ -115,6 +117,7 @@ def generate_graph(start_date, end_date):
     plt.close()
 
     return f"data:image/png;base64,{img_base64}"
+
 
 
 @app.route("/health", methods=["GET"])
