@@ -21,7 +21,7 @@ steps:
       - '--platform'
       - 'managed'
       - '--region'
-      - 'us-central1'
+      - 'europe-west1'
       - '--allow-unauthenticated'
       - '--set-env-vars'
       - 'CLIENT_ID=${_CLIENT_ID},CLIENT_SECRET=${_CLIENT_SECRET},FLASK_SECRET_KEY=${_FLASK_SECRET_KEY},REDIRECT_URI=${_REDIRECT_URI}'
