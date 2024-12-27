@@ -62,7 +62,7 @@ def fetch_heart_rate_data():
 
         # Instellingen voor datumbereiken
         today = datetime.now()
-        weeks_to_fetch = 20
+        weeks_to_fetch = 2
         date_ranges = get_date_ranges(today, weeks_to_fetch)
         logging.info(f"Datumbereiken gegenereerd voor {weeks_to_fetch} weken.")
 
@@ -79,12 +79,18 @@ def fetch_heart_rate_data():
                     cdate = (start_date + timedelta(days=i)).strftime('%Y-%m-%d')
                     try:
                         daily_data = client.get_heart_rates(cdate)
-                        if daily_data:
-                            logging.info(f"  {len(daily_data)} metingen gevonden voor {cdate}.")
-                            logging.info(f"  {daily_data}")
-                            week_data.extend(daily_data)
+                        if daily_data and "heartRateValues" in daily_data:
+                            heart_rate_values = [
+                                value[1] for value in daily_data["heartRateValues"] if value[1] is not None
+                            ]
+                            if heart_rate_values:
+                                logging.info(f"  {len(heart_rate_values)} geldige metingen gevonden voor {cdate}.")
+                                # Voeg elke hartslagwaarde met een duur van 2 minuten toe
+                                week_data.extend([{"heartRate": hr, "duration": 120} for hr in heart_rate_values])
+                            else:
+                                logging.info(f"  Geen geldige metingen gevonden voor {cdate}.")
                         else:
-                            logging.info(f"  Geen metingen gevonden voor {cdate}.")
+                            logging.info(f"  Geen gegevens beschikbaar voor {cdate}.")
                     except Exception as e:
                         logging.error(f"  Fout bij ophalen van gegevens voor {cdate}: {e}")
 
@@ -127,6 +133,7 @@ def fetch_heart_rate_data():
     except Exception as e:
         logging.error(f"Onverwachte fout: {e}")
         return jsonify({"error": "Onverwachte fout"}), 500
+
 
 
 if __name__ == "__main__":
